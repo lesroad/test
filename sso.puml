@@ -1,0 +1,590 @@
+@startuml
+namespace api {
+    class ApiSvr << (S,Aquamarine) >> {
+        - addr string
+
+        + Init(addr string, httpAddr string) 
+        + Start() error
+        + PushC2CMsg(ctx context.Context, in *immsg.PushC2CMsg) (*immsg.PushC2CMsgRsp, error)
+        + KickUid(ctx context.Context, in *imstatus.Logout) (*imstatus.LogoutRsp, error)
+        + SendChatMsg(ctx context.Context, in *immsg.SendPullC2CChatMsg) (*immsg.SendC2CChatMsgRsp, error)
+        + PushC2CReadStatusMsg(ctx context.Context, req *immsgstatus.PushC2CReadStatusMsg) (*immsgstatus.PushC2CReadStatusMsgRsp, error)
+        + PushS2CNotify(ctx context.Context, in *imrouter.SsoNotifyReq) (*imrouter.SsoNotifyRsp, error)
+        + ForwardCmd(ctx context.Context, in *sso.ForwardCmdReq) (*sso.ForwardCmdRsp, error)
+
+    }
+}
+
+
+namespace conn {
+    class Node << (S,Aquamarine) >> {
+        - uid string
+        - appid string
+        - cliConn net.Conn
+        - activeTime int64
+        - waitCloseTime int64
+        - status int
+        - handler PkgHander
+        - reader *bufio.Reader
+        - writer *bufio.Writer
+        - sendBuf []SendTask
+        - rlock sync.Mutex
+        - wlock sync.Mutex
+        - errCode imcomm.ResultCode
+        - err error
+        - lock sync.Mutex
+        - logContext string
+        - badCmdTry int
+        - inWrite int32
+        - sessionSeq int64
+        - queueBufSize uint32
+
+        + CliKey string
+
+        - checkHead(head *scomm.PkgHead) imcomm.ResultCode
+        - readSocket() 
+        - writePkg() 
+        - writeSocket() 
+        - format() string
+        - fetchInfo(pbody *sso.C2SHandshakeReq) 
+        - login(head *scomm.PkgHead, buf []byte) error
+        - handShake(body *sso.C2SHandshakeReq, buf []byte, rsp *sso.S2CHandshakeRsp) (imcomm.ResultCode, error)
+        - businessLoginCallbackVerify(body *sso.C2SHandshakeReq) error
+        - businessLoginCallbackNotify(handShake *sso.C2SHandshakeReq) 
+        - dispatchPkg(head *scomm.PkgHead, buf []byte) error
+
+        + Open(c net.Conn, wg *sync.WaitGroup) 
+        + Init() 
+        + Close() 
+        + Status() int
+        + Key() string
+        + ActiveTime() int64
+        + WaitCloseTime() int64
+        + SessionSeq() int64
+        + QueueBufSize() uint32
+        + WritePkg(buf ...[]byte) (imcomm.ResultCode, error)
+        + SetErr(code imcomm.ResultCode, err error) 
+        + ClientAddr() string
+        + CheckBadCmdToClose(cmd uint32) bool
+        + GetAppid() string
+        + GetUid() string
+        + CLog() logrus.Logger
+
+    }
+    interface PkgHander  {
+        + HandlePkg(head scomm.PkgHead, body []byte) (imcomm.ResultCode, error)
+        + OnTcpClose(code imcomm.ResultCode, err error) 
+
+    }
+    class SendTask << (S,Aquamarine) >> {
+        - ttime uint64
+        - buf []byte
+
+    }
+    class nEvent << (S,Aquamarine) >> {
+        - event int
+        - n *Node
+
+    }
+    class writeMgr << (S,Aquamarine) >> {
+        - chanNode <font color=blue>chan</font> nEvent
+        - nodeNum int32
+        - routineNum int32
+
+        - setNodeNum(num int) 
+        - dispatchWrite(node *Node) 
+        - writeHandler() 
+
+        + Init() 
+
+    }
+}
+
+"session.Writer" <|-- "conn.Node"
+
+namespace imcfg {
+    class Config << (S,Aquamarine) >> {
+        + ListenPort int
+        + AcceptNum int
+        + InnerRpcPort int
+        + InnerHttpPort int
+        + InnerTcpPort int
+        + MaxConnNum int
+        + ServerPem string
+        + ServerKey string
+        + SessionTicket []string
+        + C2SMsgLimitPerSecond int
+        + ConnKeepTime int
+        + SessKeepTime int
+        + SessScanRollTimeMs int64
+        + MsgFilterCache int64
+        + MsgFilterCacheNum int
+        + LogRotationTime int
+        + LogMaxAge int
+        + RpcTimeoutMs int
+        + LogLevel string
+        + TokenAuthDns string
+        + MetricsPort int
+        + WaitCloseTime int64
+        + LangEnv string
+        + LangAppName string
+        + LangSubTags []string
+        + DispatcherPort int
+        + RedisURL string
+        + DisableTokenAuthAppids []string
+        + EnableTransfer bool
+        + EnableTransferAppids []string
+        + WriteBuffLimit uint32
+
+        + IsDisableTokenAuth(appid string) bool
+        + IsEnableTransferAppid(appid string) bool
+
+    }
+    class SubCfg << (S,Aquamarine) >> {
+        + Env string
+        + AppName string
+        + SubTags []string
+
+    }
+}
+
+
+namespace main {
+    class CallbackImpl << (S,Aquamarine) >> {
+        + MsgPreSendCallBack(ctx context.Context, req *imrouter.MsgCallBack) (*imrouter.MsgCallBackRes, error)
+        + MsgAfterSendCallBack( context.Context,  *imrouter.MsgCallBack) (*imrouter.MsgCallBackRes, error)
+        + PreLoginCallBack( context.Context,  *imrouter.StatusCallBack) (*imrouter.StatusCallBackRes, error)
+        + AfterLoginCallBack( context.Context,  *imrouter.StatusCallBack) (*imrouter.StatusCallBackRes, error)
+        + LogoutCallBack( context.Context,  *imrouter.StatusCallBack) (*imrouter.StatusCallBackRes, error)
+        + TcpCloseCallBack( context.Context,  *imrouter.StatusCallBack) (*imrouter.StatusCallBackRes, error)
+        + TimeoutCallBack( context.Context,  *imrouter.StatusCallBack) (*imrouter.StatusCallBackRes, error)
+        + HeartBeatCallBack(ctx context.Context, back *imrouter.HeartBeatCallBack) (*imrouter.HeartBeatCallBackRes, error)
+        + TransferCmd(ctx context.Context, back *imrouter.TransferCmdReq) (*imrouter.TransferCmdRes, error)
+
+    }
+    class Client << (S,Aquamarine) >> {
+        - conn net.Conn
+        - uid string
+        - lock sync.Mutex
+
+        + SetUid(uid string) 
+        + WriteSocket(cmd sso.SsoCommad, m proto.Message) error
+        + GetHandShakeToken(appid string, uid string) string
+        + HandShake() error
+        + UserLogout() error
+        + HearBeat() error
+        + SendC2CMsg(pushAbstract string, toUid string) error
+        + RecvHandShake(buf []byte) error
+        + RecvChatInfo(buf []byte) error
+        + RecvChatMsg(buf []byte) error
+        + RecvPushMsg(buf []byte) error
+        + DispatchPkg(head *scomm.PkgHead, buf []byte) error
+        + ReadSocket() 
+        + Online() error
+
+    }
+}
+
+
+namespace scomm {
+    class PkgHead << (S,Aquamarine) >> {
+        + PkgLen uint16
+        + HeadLen uint8
+        + Version uint8
+        + Command uint32
+        + Sn uint32
+
+    }
+}
+
+
+namespace service {
+    class Manager << (S,Aquamarine) >> {
+        - listener net.Listener
+        - nodes <font color=blue>map</font>[string]*conn.Node
+        - lnodes list.List
+        - liter *list.Element
+        - lock imutil.Mutex
+        - wg sync.WaitGroup
+        - localAddr string
+        - api api.ApiSvr
+        - nodeIndex int
+
+        - listen() (net.Listener, error)
+        - onNewConn(c net.Conn) 
+        - scanNodes() 
+
+        + Init(cfg string) error
+        + Start() error
+        + ServerMonitor() 
+
+    }
+}
+
+
+namespace session {
+    class AppInfo << (S,Aquamarine) >> {
+        + OS string
+        + OSVer string
+        + Class string
+
+        + GetDeviceType() auth.DeviceType
+
+    }
+    class AppNodes << (S,Aquamarine) >> {
+        - appNodes <font color=blue>map</font>[string]*snodes
+
+        - addSess(s *Session) 
+        - forceReport() 
+
+    }
+    class ClientInfo << (S,Aquamarine) >> {
+        - skey string
+        - appid string
+        - uid string
+        - deviceId string
+        - appVersion string
+        - appLang string
+        - appOs string
+        - locale string
+        - timeZone int32
+        - versionCode int64
+        - sdkVersion int64
+        - clientAddr string
+        - os string
+        - osVer string
+        - class string
+        - logContext string
+
+    }
+    class CmdTransferHook << (S,Aquamarine) >> {
+        + OnPkgReceived(sessionKey string, pkg *transfer.Pkg) error
+        + OnSessionDestroy(sessionKey string) 
+        + OnSessionCreate(sessionKey string) 
+
+    }
+    class SessReportManager << (S,Aquamarine) >> {
+        - sessions []*Session
+        - lastReport int64
+
+        - addSess(s *Session) 
+        - forceReport() 
+
+    }
+    class Session << (S,Aquamarine) >> {
+        - token string
+        - writer Writer
+        - sesStatus int
+        - busStatus int
+        - activeTime uint64
+        - errCode imcomm.ResultCode
+        - sn uint32
+        - valid int32
+        - mf msgFilter
+        - err error
+        - statusTimeout bool
+        - waitCloseTime uint64
+        - lastReport int64
+        - lastHeartBeatCallBack int64
+        - deviceToken string
+        - sessionSeq int64
+
+        - fillSenderInfo() *imcomm.StatusDetail
+        - sendC2CMsg(head *scomm.PkgHead, ssoMsg *sso.C2SSendC2CMsg) (imcomm.ResultCode, error)
+        - reportKey() string
+        - isCmdNeedTransfer(cmd uint32, appid string) bool
+        - dispatchCmdTransfer(head scomm.PkgHead, buf []byte) error
+        - onKickUid(did string) 
+        - format() string
+        - sessionHeatBeatStatus() (int64, *imstatus.Status)
+        - sessionDeviceTokenStatus(deviceToken string) (int64, *imstatus.Status)
+        - handleHeatBeatStatus() (imcomm.ResultCode, error)
+        - handleLogoutStatus() (imcomm.ResultCode, error)
+        - businessLogoutCallbackNotify() 
+
+        + GetMsgChat() (imcomm.ResultCode, error)
+        + GetLastNotify() error
+        + Init(w Writer, key string, sessionSeq int64) 
+        + FetchInfo(req *sso.C2SHandshakeReq, clientAddr string) 
+        + CheckAppID(appID string) error
+        + CheckUid(uid string) error
+        + SessionLogin() (imcomm.ResultCode, error)
+        + NewCallBackProxyHeader(head scomm.PkgHead) (*imcomm.TransferHead, error)
+        + HandlePkg(head scomm.PkgHead, body []byte) (imcomm.ResultCode, error)
+        + OnTcpClose(code imcomm.ResultCode, err error) 
+        + SendS2CMsg(head *scomm.PkgHead, body proto.Message, cmd int, sn uint32) (imcomm.ResultCode, error)
+        + SendDispatchMsg(cmd sso.SsoCommad, body []byte) 
+        + CLog() logrus.Logger
+
+    }
+    class SessionManager << (S,Aquamarine) >> {
+        - sessions <font color=blue>map</font>[string]*Session
+        - sessReports <font color=blue>map</font>[string]int
+        - lnodes list.List
+        - liter *list.Element
+        - lock sync.Mutex
+        - addr string
+        - disAddr string
+        - srm SessReportManager
+        - appHeatBeat AppNodes
+
+        - init() error
+        - reportOnline() 
+        - scanNodes() bool
+
+        + AddSess(sess *Session) (imcomm.ResultCode, error)
+
+    }
+    interface Writer  {
+        + WritePkg(buf ...[]byte) (imcomm.ResultCode, error)
+        + SetErr(code imcomm.ResultCode, err error) 
+        + ClientAddr() string
+        + Close() 
+
+    }
+    class filterItem << (S,Aquamarine) >> {
+        - seq int64
+        - t int64
+        - sn uint32
+        - msgSeq int64
+        - msgTime int64
+        - fromUid string
+
+    }
+    class funcStruct << (S,Aquamarine) >> {
+        - rep *metrics.HistogramVec
+        - errRep *metrics.GaugeVec
+
+        + HandleFunc HandleFunc
+
+    }
+    class msgFilter << (S,Aquamarine) >> {
+        - items <font color=blue>map</font>[int64]*filterItem
+        - litems list.List
+        - msgNum int
+        - preTime time.Time
+
+        - limit(now time.Time) bool
+        - filter(seq int64, fuid string) *filterItem
+        - add(seq int64, rsp *sso.S2CSendC2CMsgRsp) 
+
+    }
+    class session.HandleFunc << (T, #FF7700) >>  {
+    }
+    class snodes << (S,Aquamarine) >> {
+        - nodes []*Session
+        - lastHeartBeat int64
+        - appid string
+
+        - tryReport() 
+        - forceReport() 
+
+    }
+    class "<font color=blue>func</font>(*Session, *scomm.PkgHead, []byte) (imcomm.ResultCode, error)" as fontcolorbluefuncfontSessionscommPkgHeadbyteimcommResultCodeerror {
+        'This class was created so that we can correctly have an alias pointing to this name. Since it contains dots that can break namespaces
+    }
+}
+"session.ClientInfo" *-- "session.Session"
+"sync.RWMutex" *-- "session.Session"
+"sync.Mutex" *-- "session.msgFilter"
+
+"conn.PkgHander" <|-- "session.Session"
+
+namespace sso {
+    class Client << (S,Aquamarine) >> {
+        - clientId string
+        - conn net.Conn
+        - connMutex sync.Mutex
+        - uid string
+        - appid string
+        - deviceId string
+        - isConnected atomic.Bool
+        - cmd2OnReceiveCmdHandler <font color=blue>map</font>[sso.SsoCommad]OnReceiveCmdHandler
+        - syncCallCh <font color=blue>chan</font> *Package
+        - peerUid2SessionInfo <font color=blue>map</font>[string]*SessionInfo
+        - notifyRecvNum int
+        - live *LiveClientInfo
+        - group *GroupClientInfo
+        - isLiveUserOnline atomic.Bool
+        - isLiveRoomOnline atomic.Bool
+
+        - getToken() string
+
+        + Connect() 
+        + Init(uid string, appid string, options ...ClientOption) *Client
+        + RegisterOnReceiveCmdHandler(cmd sso.SsoCommad, cmdFunc OnReceiveCmdHandler) *Client
+        + Run() *Client
+        + Logout() error
+        + Disconnect() *Client
+        + WaitResponse(msg proto.Message) error
+        + UserInfo() string
+        + OnPackage(pkg *Package) error
+        + OnSocketRead() 
+        + CmdTransferBegin() error
+        + CmdTransferEnd(abstract string, toUid string) error
+        + CmdTransfer201136(receiverUid string) error
+        + CmdGroupCreateGroup() error
+        + CmdGroupDestroyGroup() error
+        + CmdGroupUpdateGroupInfo(name *string, ext <font color=blue>map</font>[string]string) error
+        + CmdGroupGetGroupInfo() error
+        + CmdGroupJoinGroup() error
+        + CmdGroupLeaveGroup() error
+        + CmdGroupGetMemberList(cursor uint64) error
+        + CmdGroupGetMemberInfo(uids ...string) error
+        + CmdGroupUpdateMemberInfo(ext <font color=blue>map</font>[string]string) error
+        + CmdGroupGetUserGroupList() error
+        + CmdGroupKickMember(kickUid string) error
+        + CmdGroupMuteMember() error
+        + CmdGroupTransferOwner(toUid string) error
+        + CmdGroupSendMsg(content string, transExt string) error
+        + CmdGroupFetchMsg() error
+        + CmdGroupFetchMsgReq(isLogin bool, segs ...*imcomm.GroupMsgSegment) error
+        + CmdGroupFetchSystemMsg() error
+        + CmdGroupFetchSystemMsgReq(isLogin bool, segs ...*imcomm.GroupMsgSegment) error
+        + CmdGroupReportLostMsg(groupId string, latestSeq int64, bitMap int64) error
+        + CmdGroupReportLostSystemMsg(groupId string, latestSeq int64, bitMap int64) error
+        + CmdGroupWithdrawMsg(msgSeq int64) error
+        + CmdGroupReportDeletedSeq(msgSeq int64, sysMsgSeq int64) error
+        + CmdSendC2CMsg(abstract string, toUid string) error
+        + CmdPullReadStatus(receiverUid string) error
+        + CmdReportReadStatus(senderUid string, readSeq int64) error
+        + CmdPullC2CMsg(buf []byte) error
+        + CmdPullC2CMsgWithFromUid(fromUid string, localSeq int64) error
+        + CmdReportC2CMsg(buf []byte) error
+        + CmdPushC2CMsgAck(buf []byte) error
+        + OnReceiveHadHistoryC2CMsgSessionListNotifyAndPull(pkg *Package, message proto.Message) error
+        + OnReceivePullHistorySessionC2CMsgAndReportReceived(pkg *Package, message proto.Message) error
+        + OnReceivePushC2CMsgAndReportAck(pkg *Package, message proto.Message) error
+        + OnReceivePushC2CMsgAndReportAckThenEchoAttenuation(pkg *Package, message proto.Message) error
+        + OnReceiveKickOffAndDisconnect(pkg *Package, message proto.Message) error
+        + OnReceiveNotifyAndNotifyAck(pkg *Package, message proto.Message) error
+        + OnReceiveUserJoinRspAndTriggerHeartbeat(pkg *Package, message proto.Message) error
+        + OnReceiveUserLeaveRspAndStopHeartbeat(pkg *Package, message proto.Message) error
+        + OnReceiveUserKickOffPushAndStopHeartbeat(pkg *Package, message proto.Message) error
+        + OnReceiveRoomOnlineRspAndTriggerHeartbeat(pkg *Package, message proto.Message) error
+        + OnReceiveRoomOfflineRspAndStopHeartbeat(pkg *Package, message proto.Message) error
+        + CmdLiveUserJoin() error
+        + CmdLiveUserLeave() error
+        + CmdLiveUserHeartbeat() error
+        + CmdLiveSendMsg(liveMsg string) error
+        + CmdLivePullUserInfo(uids []string) error
+        + CmdLivePullRoomInfo(roomIds []string) error
+        + CmdLiveRoomOnline() error
+        + CmdLiveRoomOffline() error
+        + CmdLiveRoomHeartbeat() error
+        + LiveUserJoin() *Client
+        + LiveUserLeave() *Client
+        + LiveRoomOnline() *Client
+        + LiveRoomOffline() *Client
+        + CmdLiveAnchorSendMsg(liveMsg string) error
+        + StopUserHeartbeat() *Client
+        + StopRoomHeartbeat() *Client
+        + CmdHandShake() error
+        + UpdateLocationToken() error
+        + CmdHearBeat() error
+
+    }
+    class ClientStatics << (S,Aquamarine) >> {
+        - c2cMsgPushReceiveCount atomic.Int64
+        - c2cMsgPushReceiveCountOnline atomic.Int64
+        - c2cMsgPushReceiveCountOffline atomic.Int64
+
+        + AddC2CMsgPushReceiveCount(count int64, isOnline bool) 
+        + GetC2CMsgPushReceiveCount() int64
+        + GetC2CMsgPushReceiveCountOffline() int64
+
+    }
+    class ContactRateStatistics << (S,Aquamarine) >> {
+        - clientSeq2SRInfo <font color=blue>map</font>[int64]*SendReceiveInfo
+        - rwMutex sync.RWMutex
+
+        + Result() 
+        + SeqSendRecord(uid string, seq int64, t time.Time) 
+        + SeqReceiveRecord(uid string, seq int64, t time.Time, isReceiveFromOnline bool) 
+
+    }
+    class GroupClientInfo << (S,Aquamarine) >> {
+        - groupId string
+        - baseExtension <font color=blue>map</font>[string]string
+        - memberExtension <font color=blue>map</font>[string]string
+        - initMembers []*imcomm.GroupMemberInfo
+        - ownerUid string
+
+    }
+    class LiveClientInfo << (S,Aquamarine) >> {
+        - roomId string
+        - userAttr string
+        - roomAttr string
+
+    }
+    class OnReceiveCmdHandler << (S,Aquamarine) >> {
+        + OnReceiveFunc OnReceiveCmdFunc
+        + Body proto.Message
+
+    }
+    class Package << (S,Aquamarine) >> {
+        + Head *scomm.PkgHead
+        + BodyBuf []byte
+        + ExtPrint string
+
+    }
+    class Rsp << (S,Aquamarine) >> {
+    }
+    class RspHead << (S,Aquamarine) >> {
+        + Code int64
+        + Desc string
+
+    }
+    class SendReceiveInfo << (S,Aquamarine) >> {
+        - isSendOK bool
+        - isReceiveOk bool
+        - isReceiveFromOnline bool
+
+        + Seq int64
+        + SendTime time.Time
+        + ReceiveTime time.Time
+        + SendUid string
+        + ReceiveUid string
+
+    }
+    class SessionInfo << (S,Aquamarine) >> {
+        + ReceiveSeq int64
+        + ReadSeq int64
+
+    }
+    class Statics << (S,Aquamarine) >> {
+        - crs *ContactRateStatistics
+        - tc *TimeCost
+
+        + Result() 
+        + SendRecord(msg *imcomm.Msg) 
+        + ReceiveRecord(msg *imcomm.Msg, isReceiveFromOnline bool) 
+
+    }
+    class TimeCost << (S,Aquamarine) >> {
+        - lk sync.RWMutex
+
+        + StartTime time.Time
+        + FinishTime time.Time
+
+        + RecordStart(msg *imcomm.Msg) 
+        + RecordFinish(msg *imcomm.Msg) 
+        + Result() 
+
+    }
+    class sso.ClientOption << (T, #FF7700) >>  {
+    }
+    class sso.OnReceiveCmdFunc << (T, #FF7700) >>  {
+    }
+    class "<font color=blue>func</font>(*Package, proto.Message) error" as fontcolorbluefuncfontPackageprotoMessageerror {
+        'This class was created so that we can correctly have an alias pointing to this name. Since it contains dots that can break namespaces
+    }
+}
+"sso.ClientStatics" *-- "sso.Client"
+"sso.RspHead" *-- "sso.Rsp"
+
+
+"session.fontcolorbluefuncfontSessionscommPkgHeadbyteimcommResultCodeerror" #.. "session.HandleFunc"
+"sso.<font color=blue>func</font>(*Client) " #.. "sso.ClientOption"
+"sso.fontcolorbluefuncfontPackageprotoMessageerror" #.. "sso.OnReceiveCmdFunc"
+@enduml
