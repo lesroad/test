@@ -1,0 +1,340 @@
+@startuml
+namespace api {
+    class CompensateHandler << (S,Aquamarine) >> {
+        - taskRollbackSvr *service.DashboardTaskService
+
+        + EditOneRecord(ctx *gin.Context) 
+
+    }
+    class DashboardTaskHandler << (S,Aquamarine) >> {
+        - taskRollbackSvr *service.DashboardTaskService
+        - checkService *service.CheckService
+
+        + EditOneRecord(c *gin.Context) 
+        + QueryTaskDetails(c *gin.Context) 
+        + RollBackTask(c *gin.Context) 
+        + QueryTasks(c *gin.Context) 
+
+    }
+    class UploadHandler << (S,Aquamarine) >> {
+        - uploadService *service.BatchUploadService
+
+        + BatchUpload(c *gin.Context) 
+
+    }
+}
+
+
+namespace config {
+    class Conf << (S,Aquamarine) >> {
+        + Port string
+        + TaskEffectHours int64
+        + AlarmUrl string
+        + EditOneUrl string
+
+    }
+}
+
+
+namespace dal {
+    class BucketImpl << (S,Aquamarine) >> {
+        - bucket *oss.Bucket
+
+        + PutObject(reader *bytes.Reader, fileName string) error
+
+    }
+    class MongoImpl << (S,Aquamarine) >> {
+        - mongoColl *mongo.Collection
+
+        + SaveRecord(ctx context.Context, pdid int32, tbName string, creator string, record model.Message, taskId int64) error
+        + GetRecordsByTaskId(ctx context.Context, taskId int64, pdid int32, tbName string) ([]<font color=blue>map</font>[string]<font color=blue>interface</font>{}, error)
+
+    }
+    class MySQLImpl << (S,Aquamarine) >> {
+        - odbs <font color=blue>map</font>[const_define.PdId]*sqlx.DB
+        - mdbs <font color=blue>map</font>[const_define.PdId]*sqlx.DB
+
+        + GetUserLastTask(ctx context.Context, pdid int32, tbName string, creator string) (*model.TaskPo, error)
+        + CreateTask(ctx context.Context, pdid int32, tbName string, creator string) (int64, error)
+        + CreateMirrorTable(ctx context.Context, srcTable string, destTable string) error
+        + ReplaceDataAndReturnPriID(ctx context.Context, dataOp <font color=blue>map</font>[string]<font color=blue>interface</font>{}, pdId int32, tbName string) (int64, error)
+        + DeleteDataByID(ctx context.Context, pdId int32, Id int64, tableName string) error
+        + GetGoodsBasicInfoById(ctx context.Context, id int64, pdId int32) (<font color=blue>map</font>[string]any, error)
+        + GetGoodsOnShelfByID(ctx context.Context, id int64, pdId int32) (<font color=blue>map</font>[string]any, error)
+        + GetGoodsChannelConfigByID(ctx context.Context, id int64, pdId int32) (<font color=blue>map</font>[string]any, error)
+        + GetManualDollarRateHistoryById(ctx context.Context, id int64, pdId int32) (<font color=blue>map</font>[string]any, error)
+        + GetIpBlackListById(ctx context.Context, id int64, pdId int32) (<font color=blue>map</font>[string]any, error)
+        + GetOrderFraudById(ctx context.Context, id int64, pdId int32) (<font color=blue>map</font>[string]any, error)
+        + GetTaskByTaskId(ctx context.Context, taskId int64) (*model.TaskPo, error)
+        + RenameMirrorTable(ctx context.Context, pdId int32, oldTb string, newTb string, tmpTb string) error
+        + GetAllTasks(ctx context.Context, pdId int32, tbName string) ([]model.TaskPo, error)
+
+    }
+    class Nacos << (S,Aquamarine) >> {
+        - nacosCli *nacos.NacosClient
+
+        + GetNacosConfig(dataId string, group string) (string, error)
+
+    }
+    class OssConfig << (S,Aquamarine) >> {
+        + AccessKeyId string
+        + AccessKeySecret string
+        + Endpoint string
+        + Bucket string
+
+    }
+    class dal.TypePdID << (T, #FF7700) >>  {
+    }
+}
+
+
+namespace di {
+    class Dependencies << (S,Aquamarine) >> {
+        + Config *config.Conf
+        + Nacos *dal.Nacos
+        + MongoDB *dal.MongoImpl
+        + MySQL *dal.MySQLImpl
+        + Bucket *dal.BucketImpl
+        + TaskService *service.DashboardTaskService
+        + CheckService *service.CheckService
+        + TaskHandler *api.DashboardTaskHandler
+        + UploadService *service.BatchUploadService
+        + UploadHandler *api.UploadHandler
+        + AlarmMw *middleware.FailureAlarmMw
+        + CompensateHandler *api.CompensateHandler
+
+    }
+}
+"dig.In" *-- "di.Dependencies"
+
+
+namespace logic {
+    class BaseExecutor << (S,Aquamarine) >> {
+        - db *dal.MySQLImpl
+        - pdId int32
+        - tableName string
+
+        - getOldRecordMap(ctx context.Context, record model.Message) (<font color=blue>map</font>[string]any, error)
+        - getNewRecordMap(ctx context.Context, actionFlag int32, priID int64) (<font color=blue>map</font>[string]any, error)
+        - reWrite(ctx context.Context, record model.Message) (int64, error)
+
+    }
+    interface Executor  {
+        + Input(ctx context.Context, finalMessage []model.Message) ([]<font color=blue>map</font>[string]any, error)
+
+    }
+    class LogsExecutor << (S,Aquamarine) >> {
+        + Input(ctx context.Context, finalMessage []model.Message) ([]<font color=blue>map</font>[string]any, error)
+
+    }
+    class NoLogsExecutor << (S,Aquamarine) >> {
+        + Input(ctx context.Context, finalMessage []model.Message) ([]<font color=blue>map</font>[string]any, error)
+
+    }
+}
+"logic.BaseExecutor" *-- "logic.LogsExecutor"
+"logic.BaseExecutor" *-- "logic.NoLogsExecutor"
+
+"logic.Executor" <|-- "logic.LogsExecutor"
+"logic.Executor" <|-- "logic.NoLogsExecutor"
+
+namespace middleware {
+    class FailureAlarmMw << (S,Aquamarine) >> {
+        - conf *config.Conf
+
+        + FailureAlarm(c *gin.Context) 
+
+    }
+    interface FormDataParser  {
+        + Parse(ctx *gin.Context) (*model.RequestData, error)
+
+    }
+    class GetFormDataParser << (S,Aquamarine) >> {
+        + Parse(ctx *gin.Context) (*model.RequestData, error)
+
+    }
+    class MultipartFormDataParser << (S,Aquamarine) >> {
+        + Parse(ctx *gin.Context) (*model.RequestData, error)
+
+    }
+    class PostJsonParser << (S,Aquamarine) >> {
+        + Parse(ctx *gin.Context) (*model.RequestData, error)
+
+    }
+}
+
+"middleware.FormDataParser" <|-- "middleware.GetFormDataParser"
+"middleware.FormDataParser" <|-- "middleware.MultipartFormDataParser"
+"middleware.FormDataParser" <|-- "middleware.PostJsonParser"
+
+namespace model {
+    class BatchUploadReq << (S,Aquamarine) >> {
+        + Pdid int32
+        + TableName string
+        + Creator string
+
+    }
+    class EditOneReq << (S,Aquamarine) >> {
+        + Pdid int32
+        + TableName string
+        + Creator string
+        + GenNewImage bool
+        + NoBackOpLogs bool
+        + FinalMessage []Message
+
+    }
+    class GoodsBasicInfoPo << (S,Aquamarine) >> {
+        + ID int64
+        + GoodsID int32
+        + ChannelID int32
+        + MethodID string
+        + Currency string
+        + Price string
+        + GoodsDesc string
+        + PriceDesc string
+        + Units int32
+        + SupportRole int32
+        + Catagory int16
+        + Kind uint8
+        + Tags string
+        + Revision int32
+        + CreateTime string
+        + UpdateTime string
+
+    }
+    class GoodsChannelConfigPo << (S,Aquamarine) >> {
+        + ID int64
+        + AppID string
+        + ChannelID int32
+        + ChannelProductID string
+        + GoodsID int32
+        + MethodID string
+        + CreateTime string
+        + UpdateTime string
+
+    }
+    class GoodsOnShelfPo << (S,Aquamarine) >> {
+        + ID int64
+        + GoodsID int64
+        + ChannelID int32
+        + Region string
+        + AppMinLevel int32
+        + WebMinLevel int32
+        + PosNum int32
+        + DiscountRatio float64
+        + DiscountLabel string
+        + Revision int32
+        + CreateTime string
+        + UpdateTime string
+
+    }
+    class IPBlackPo << (S,Aquamarine) >> {
+        + ID int64
+        + IP string
+        + State int16
+        + CreateTime string
+        + UpdateTime string
+        + PdSource int32
+        + Location string
+        + RelatedUID string
+        + IPTag int32
+        + Remark string
+        + Creator string
+
+    }
+    class ManualDollarRateHistoryPo << (S,Aquamarine) >> {
+        + ID int64
+        + Currency string
+        + Rate float64
+        + Date string
+        + CreateTime string
+        + UpdateTime string
+
+    }
+    class Message << (S,Aquamarine) >> {
+        + ActionFlag int32
+        + Data <font color=blue>map</font>[string]any
+
+    }
+    class OrderFraudPo << (S,Aquamarine) >> {
+        + OrderID string
+        + TxID string
+        + ChannelID int32
+        + ChannelEventName string
+        + ChargeID string
+        + NofReason string
+        + NofTime string
+        + CreateTime string
+        + UpdateTime string
+
+    }
+    class QueryOneReq << (S,Aquamarine) >> {
+        + Pdid int32
+        + TaskId int64
+        + TableName string
+
+    }
+    class QueryTasksReq << (S,Aquamarine) >> {
+        + Pdid int32
+        + TableName string
+
+    }
+    class RequestData << (S,Aquamarine) >> {
+        + FormValues url.Values
+        + FileData <font color=blue>map</font>[string][]byte
+        + Raw []byte
+
+    }
+    class RollBackReq << (S,Aquamarine) >> {
+        + Pdid int32
+        + TaskId int64
+
+    }
+    class TaskPo << (S,Aquamarine) >> {
+        + ID int64
+        + PdID int32
+        + TbName string
+        + Creator string
+        + CTime int64
+        + MTime int64
+
+    }
+}
+
+
+namespace service {
+    class BatchUploadService << (S,Aquamarine) >> {
+        - bucket *dal.BucketImpl
+        - conf *config.Conf
+
+        + ExecLine(ctx context.Context, data []byte, uploadReq model.BatchUploadReq) error
+        + UploadOss(data []byte, uploadReq model.BatchUploadReq, name string) error
+
+    }
+    class CheckService << (S,Aquamarine) >> {
+        + CheckEditOneRecord(tableName string, creator string, finalMessage []model.Message) error
+        + CheckQueryTaskDetails(pdid int32, taskId int64, tbName string) error
+        + CheckRollBackTask(pdid int32, taskId int64) error
+        + CheckQueryTasks(pdid int32, tbName string) error
+
+    }
+    class DashboardTaskService << (S,Aquamarine) >> {
+        - mongoOps *dal.MongoImpl
+        - mysqlOps *dal.MySQLImpl
+        - bucketOps *dal.BucketImpl
+        - conf *config.Conf
+
+        + TemporaryStorage(ctx context.Context, pdid int32, tableName string, creator string, finalMessage []model.Message, taskId int64) error
+        + GetTaskID(ctx context.Context, pdId int32, tableName string, creator string, genNewImage bool) (int64, error)
+        + ExecTask(ctx context.Context, pdid int32, finalMessage []model.Message, tableName string, noBackOpLogs bool) ([]<font color=blue>map</font>[string]any, error)
+        + GetRollBackParam(ctx *gin.Context) (int32, int64, error)
+        + RollBackTask(ctx context.Context, pdid int32, taskId int64) error
+        + QueryTaskDetails(ctx context.Context, taskId int64, pdid int32, tbName string) ([]<font color=blue>map</font>[string]<font color=blue>interface</font>{}, error)
+        + QueryAllTasks(ctx context.Context, pdid int32, tbName string) ([]<font color=blue>map</font>[string]<font color=blue>interface</font>{}, error)
+
+    }
+}
+
+
+"__builtin__.string" #.. "dal.TypePdID"
+@enduml
